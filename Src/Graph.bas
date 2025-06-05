@@ -5,7 +5,9 @@ Option Explicit
 Private pClient As WebClient
 Private pClientId As String
 Private pTenantID As String
+Private pClientSecret As String
 Private pWaitForLogin As Integer
+Private pGrantType As String
 
 Public Property Get Client() As WebClient
     If pClient Is Nothing Then
@@ -13,18 +15,23 @@ Public Property Get Client() As WebClient
         pClient.BaseUrl = "https://graph.microsoft.com/v1.0"
         pClientId = DLookup("ClientID", "AdminTable") 'Application (client) ID
         pTenantID = DLookup("TenantID", "AdminTable") 'Directory (Tenant) ID
+        pClientSecret = DLookup("ClientSecret", "AdminTable") 'Client Secret
         pWaitForLogin = DLookup("WaitForLogin", "AdminTable") 'Login wait period defaults to 60 seconds
+        pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
         
         Dim Auth As New GraphAuthenticator
-        Auth.Setup pClientId, pTenantID, pWaitForLogin
+        Auth.Setup pClientId, pTenantID, pClientSecret, pWaitForLogin, pGrantType
 '        Auth.AddScope "offline_access"  'if using Refresh Token
-        Auth.AddScope "mail.readwrite"
-        Auth.AddScope "mail.send"
-        Auth.AddScope "calendars.readwrite"
-        Auth.AddScope "contacts.readwrite"
+        If pGrantType = "authorization_code" Then
+            Auth.AddScope "mail.readwrite"
+            Auth.AddScope "mail.send"
+            Auth.AddScope "calendars.readwrite"
+            Auth.AddScope "contacts.readwrite"
+        Else
+            Auth.AddScope ".default"
+        End If
         Auth.AuthorizationUrl = "https://login.microsoftonline.com/" & pTenantID & "/oauth2/v2.0/authorize"
-        Call Auth.Login
-        
+'        Call Auth.Login
         Set pClient.Authenticator = Auth
     End If
     
@@ -44,9 +51,15 @@ Public Sub Logout()
 End Sub
 
 
-Public Function CreateDraftMessage(Subject As String, BodyType As String, BodyContent As String, toRecipients As String, ccRecipients As String, bccRecipients As String, AttachmentPath As String) As WebResponse
+Public Function CreateDraftMessage(UserPrincipal As String, Subject As String, BodyType As String, BodyContent As String, toRecipients As String, ccRecipients As String, bccRecipients As String, AttachmentPath As String) As WebResponse
     Dim Request As New WebRequest
-    Request.Resource = "/me/messages"
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If pGrantType = "authorization_code" Then
+        Request.Resource = "/me"
+    Else
+        Request.Resource = "/users/" & UserPrincipal
+    End If
+    Request.Resource = Request.Resource & "/messages"
     Request.Method = WebMethod.HttpPOST
     Request.Format = WebFormat.JSON
     
@@ -76,15 +89,7 @@ Public Function CreateDraftMessage(Subject As String, BodyType As String, BodyCo
     Dim attachments As Collection
     If Trim(AttachmentPath) <> "" Then
         Set attachments = New Collection
-        Dim attachment As Dictionary
-        Dim sFileName As String
-        sFileName = Mid(AttachmentPath, InStrRev(AttachmentPath, "\") + 1)
-        Set attachment = New Dictionary
-        attachment.Add "@odata.type", "#microsoft.graph.fileAttachment"
-        attachment.Add "name", sFileName
-'        attachment.Add "contentType", "text/plain" 'Not mandatory so leave off for flexibility
-        attachment.Add "contentBytes", ConvertFileToBase64(AttachmentPath)
-        attachments.Add attachment, ""
+        FillAttachmentCollection attachments, AttachmentPath
     End If
     
     With Request
@@ -110,10 +115,43 @@ Public Function CreateDraftMessage(Subject As String, BodyType As String, BodyCo
 
 End Function
 
+Private Sub FillAttachmentCollection(ByVal fillCollection As Collection, fillString As String)
+    Dim sFileName As String
+    Dim sFilePath As String
+    Dim attachment As Dictionary
+    
+    fillString = Replace(fillString, " ", "")
+    If Mid(fillString, Len(fillString)) = ";" Then
+        fillString = Left(fillString, Len(fillString) - 1)
+    End If
+    While InStr(fillString, ";") > 0
+        Set attachment = New Dictionary
+        attachment.Add "@odata.type", "#microsoft.graph.fileAttachment"
+        sFilePath = Trim(Left(fillString, InStr(fillString, ";") - 1))
+        fillString = Mid(fillString, InStr(fillString, ";") + 1)
+        sFileName = Mid(sFilePath, InStrRev(sFilePath, "\") + 1)
+        attachment.Add "name", sFileName
+'        attachment.Add "contentType", "text/plain" 'Not mandatory so leave off for flexibility
+        attachment.Add "contentBytes", ConvertFileToBase64(sFilePath)
+        fillCollection.Add attachment
+    Wend
+    Set attachment = New Dictionary
+    attachment.Add "@odata.type", "#microsoft.graph.fileAttachment"
+    sFileName = Mid(fillString, InStrRev(fillString, "\") + 1)
+    attachment.Add "name", sFileName
+'   attachment.Add "contentType", "text/plain" 'Not mandatory so leave off for flexibility
+    attachment.Add "contentBytes", ConvertFileToBase64(fillString)
+    fillCollection.Add attachment
+End Sub
+
 Private Sub FillEmailAddressCollection(ByVal fillCollection As Collection, fillString As String)
     Dim sAddress As String
     Dim EmailAddress As Dictionary
     
+    fillString = Replace(fillString, " ", "")
+    If Mid(fillString, Len(fillString)) = ";" Then
+        fillString = Left(fillString, Len(fillString) - 1)
+    End If
     While InStr(fillString, ";") > 0
         Set EmailAddress = New Dictionary
         EmailAddress.Add "emailAddress", New Dictionary
@@ -128,9 +166,15 @@ Private Sub FillEmailAddressCollection(ByVal fillCollection As Collection, fillS
     fillCollection.Add EmailAddress
 End Sub
 
-Public Function GraphSendMail(Subject As String, BodyType As String, BodyContent As String, toRecipients As String, ccRecipients As String, bccRecipients As String, AttachmentPath As String) As WebResponse
+Public Function GraphSendMail(UserPrincipal As String, Subject As String, BodyType As String, BodyContent As String, toRecipients As String, ccRecipients As String, bccRecipients As String, AttachmentPath As String) As WebResponse
     Dim Request As New WebRequest
-    Request.Resource = "/me/sendMail"
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If pGrantType = "authorization_code" Then
+        Request.Resource = "/me"
+    Else
+        Request.Resource = "/users/" & UserPrincipal
+    End If
+    Request.Resource = Request.Resource & "/sendMail"
     Request.Method = WebMethod.HttpPOST
     Request.Format = WebFormat.JSON
     
@@ -163,15 +207,7 @@ Public Function GraphSendMail(Subject As String, BodyType As String, BodyContent
     Dim attachments As Collection
     If Trim(AttachmentPath) <> "" Then
         Set attachments = New Collection
-        Dim attachment As Dictionary
-        Dim sFileName As String
-        sFileName = Mid(AttachmentPath, InStrRev(AttachmentPath, "\") + 1)
-        Set attachment = New Dictionary
-        attachment.Add "@odata.type", "#microsoft.graph.fileAttachment"
-        attachment.Add "name", sFileName
-'        attachment.Add "contentType", "text/plain" 'Not mandatory so leave off for flexibility
-        attachment.Add "contentBytes", ConvertFileToBase64(AttachmentPath)
-        attachments.Add attachment, ""
+        FillAttachmentCollection attachments, AttachmentPath
     End If
     
     With message
@@ -213,6 +249,18 @@ Private Sub FillAttendeeCollection(ByVal fillCollection As Collection, fillStrin
     Dim sAddress As String
     Dim EmailAddress As Dictionary
     
+    fillStringReq = Replace(fillStringReq, " ", "")
+    If Len(fillStringReq) > 0 Then
+        If Mid(fillStringReq, Len(fillStringReq)) = ";" Then
+            fillStringReq = Left(fillStringReq, Len(fillStringReq) - 1)
+        End If
+    End If
+    fillStringOpt = Replace(fillStringOpt, " ", "")
+    If Len(fillStringOpt) > 0 Then
+        If Mid(fillStringOpt, Len(fillStringOpt)) = ";" Then
+            fillStringOpt = Left(fillStringOpt, Len(fillStringOpt) - 1)
+        End If
+    End If
     While InStr(fillStringReq, ";") > 0
         Set EmailAddress = New Dictionary
         EmailAddress.Add "emailAddress", New Dictionary
@@ -247,9 +295,15 @@ Private Sub FillAttendeeCollection(ByVal fillCollection As Collection, fillStrin
     End If
 End Sub
 
-Public Function CreateEvent(Subject As String, BodyType As String, BodyContent As String, dStart As Date, tStart As Date, dEnd As Date, tEnd As Date, sLocation As String, sAttendees As String, sOptional As String) As WebResponse
+Public Function CreateEvent(UserPrincipal As String, Subject As String, BodyType As String, BodyContent As String, dStart As Date, tStart As Date, dEnd As Date, tEnd As Date, sLocation As String, sAttendees As String, sOptional As String) As WebResponse
     Dim Request As New WebRequest
-    Request.Resource = "/me/events"
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If pGrantType = "authorization_code" Then
+        Request.Resource = "/me"
+    Else
+        Request.Resource = "/users/" & UserPrincipal
+    End If
+    Request.Resource = Request.Resource & "/events"
     Request.Method = WebMethod.HttpPOST
     Request.Format = WebFormat.JSON
 
@@ -285,7 +339,7 @@ Public Function CreateEvent(Subject As String, BodyType As String, BodyContent A
         If Trim(sLocation) <> "" Then .AddBodyParameter "location", location
         .AddBodyParameter "attendees", attendees
         .AddBodyParameter "allowNewTimeProposals", "true"
-        .AddBodyParameter "transactionId", CreateGUID()
+'        .AddBodyParameter "transactionId", CreateGUID()
     End With
     
     Dim sStatus As String
@@ -301,14 +355,19 @@ Public Function CreateEvent(Subject As String, BodyType As String, BodyContent A
     Wend
 End Function
 
-Public Function ListContacts(sFolder As String) As WebResponse
+Public Function ListContacts(UserPrincipal As String, sFolder As String) As WebResponse
     Dim Request As New WebRequest
-    
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If pGrantType = "authorization_code" Then
+        Request.Resource = "/me"
+    Else
+        Request.Resource = "/users/" & UserPrincipal
+    End If
     If sFolder = "" Then
-        Request.Resource = "/me/contacts"
+        Request.Resource = Request.Resource & "/contacts"
     Else
         'Syntax for getting a specific folder uses the folder id so you have to get that first
-        Request.Resource = "/me/contactfolders/" & GetFolderID(sFolder) & "/contacts"
+        Request.Resource = Request.Resource & "/contactfolders/" & GetContactFolderID(UserPrincipal, sFolder) & "/contacts"
     End If
     Request.Method = WebMethod.HttpGET
     Request.Format = WebFormat.JSON
@@ -327,40 +386,51 @@ Public Function ListContacts(sFolder As String) As WebResponse
     Wend
 End Function
 
-Public Function GetFolderID(sFolder As String) As String
+Public Function GetContactFolderID(UserPrincipal As String, sFolder As String) As String
     Dim Request As New WebRequest
     Dim Response As New WebResponse
-    
-    GetFolderID = "Retry"
-    While GetFolderID = "Retry"
-        Request.Resource = "/me/contactFolders"
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If pGrantType = "authorization_code" Then
+        Request.Resource = "/me"
+    Else
+        Request.Resource = "/users/" & UserPrincipal
+    End If
+    Request.Resource = Request.Resource & "/contactfolders"
+    GetContactFolderID = "Retry"
+    While GetContactFolderID = "Retry"
         Set Response = Client.Execute(Request)
         If Response.StatusCode = WebStatusCode.OK Then
             Dim FolderInfo As Dictionary
             For Each FolderInfo In Response.Data("value")
                 If FolderInfo("displayName") = sFolder Then
-                    GetFolderID = FolderInfo("id")
+                    GetContactFolderID = FolderInfo("id")
                 End If
             Next FolderInfo
         Else
             If Response.StatusCode = WebStatusCode.Unauthorized And InStr(Response.Content, "expired") Then
                 ClearAuthCodes
-                GetFolderID = "Retry"
+                GetContactFolderID = "Retry"
             Else
                 MsgBox "Error " & Response.StatusCode & ": " & Response.Content
-                GetFolderID = "Error"
+                GetContactFolderID = "Error"
             End If
         End If
     Wend
 End Function
 
-Public Function CreateContact(sFolder As String, givenName As String, surname As String, fileAs As String, jobTitle As String, companyName As String, sBusinessPhones As String, sEmailAddresses As String) As WebResponse
+Public Function CreateContact(UserPrincipal As String, sFolder As String, givenName As String, surname As String, fileAs As String, jobTitle As String, companyName As String, sBusinessPhones As String, sEmailAddresses As String) As WebResponse
     Dim Request As New WebRequest
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If pGrantType = "authorization_code" Then
+        Request.Resource = "/me"
+    Else
+        Request.Resource = "/users/" & UserPrincipal
+    End If
     If sFolder = "" Then
-        Request.Resource = "/me/contacts"
+        Request.Resource = Request.Resource & "/contacts"
     Else
         'Syntax for getting a specific folder uses the folder id so you have to get that first
-        Request.Resource = "/me/contactfolders/" & GetFolderID(sFolder) & "/contacts"
+        Request.Resource = Request.Resource & "/contactfolders/" & GetContactFolderID(UserPrincipal, sFolder) & "/contacts"
     End If
     Request.Method = WebMethod.HttpPOST
     Request.Format = WebFormat.JSON
@@ -421,4 +491,68 @@ Public Function CreateContact(sFolder As String, givenName As String, surname As
         End If
     Wend
 End Function
+
+Public Function ListMessages(UserPrincipal As String, sFolder As String) As WebResponse
+    Dim Request As New WebRequest
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If pGrantType = "authorization_code" Then
+        Request.Resource = "/me"
+    Else
+        Request.Resource = "/users/" & UserPrincipal
+    End If
+    If sFolder = "" Then
+        Request.Resource = Request.Resource & "/messages"
+    Else
+        'Syntax for getting a specific folder uses the folder id so you have to get that first
+        Request.Resource = Request.Resource & "/mailfolders/" & GetMailFolderID(UserPrincipal, sFolder) & "/messages"
+    End If
+    Request.Method = WebMethod.HttpGET
+    Request.Format = WebFormat.JSON
+    Request.AddQuerystringParam "Top", 1000
+    
+    Dim sStatus As String
+    sStatus = "Retry"
+    While sStatus = "Retry"
+        Set ListMessages = Client.Execute(Request)
+        If ListMessages.StatusCode = WebStatusCode.Unauthorized And InStr(ListMessages.Content, "expired") Then
+            ClearAuthCodes
+            sStatus = "Retry"
+        Else
+            sStatus = "Done"
+        End If
+    Wend
+End Function
+
+Public Function GetMailFolderID(UserPrincipal As String, sFolder As String) As String
+    Dim Request As New WebRequest
+    Dim Response As New WebResponse
+    If pGrantType = "" Then pGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If pGrantType = "authorization_code" Then
+        Request.Resource = "/me"
+    Else
+        Request.Resource = "/users/" & UserPrincipal
+    End If
+    Request.Resource = Request.Resource & "/mailfolders"
+    GetMailFolderID = "Retry"
+    While GetMailFolderID = "Retry"
+        Set Response = Client.Execute(Request)
+        If Response.StatusCode = WebStatusCode.OK Then
+            Dim FolderInfo As Dictionary
+            For Each FolderInfo In Response.Data("value")
+                If FolderInfo("displayName") = sFolder Then
+                    GetMailFolderID = FolderInfo("id")
+                End If
+            Next FolderInfo
+        Else
+            If Response.StatusCode = WebStatusCode.Unauthorized And InStr(Response.Content, "expired") Then
+                ClearAuthCodes
+                GetMailFolderID = "Retry"
+            Else
+                MsgBox "Error " & Response.StatusCode & ": " & Response.Content
+                GetMailFolderID = "Error"
+            End If
+        End If
+    Wend
+End Function
+
 
