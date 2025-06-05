@@ -9,6 +9,7 @@ Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Compare Database
 Option Explicit
+Dim sGrantType As String
 
 Private Sub cmdBrowse_Click()
     Dim Fd As Variant
@@ -21,7 +22,12 @@ End Sub
 'groups, see https://learn.microsoft.com/en-us/graph/api/attachment-createuploadsession?view=graph-rest-1.0&tabs=http
 
 Private Sub cmdCreateDraft_Click()
-    CreateDraftEmail Graph.CreateDraftMessage(Nz(Me.sSubject, ""), "HTML", Nz(Me.sBody, ""), Nz(Me.sTo, ""), Nz(Me.sCC, ""), Nz(Me.sBcc, ""), Nz(Me.sAttachment, ""))
+    If Nz(Me.sFrom, "") = "" And sGrantType = "client_credentials" Then
+        MsgBox "From address is mandatory and must be a valid mailbox in this client."
+        Me.sFrom.SetFocus
+    Else
+        CreateDraftEmail Graph.CreateDraftMessage(Nz(Me.sFrom, ""), Nz(Me.sSubject, ""), "HTML", Nz(Me.sBody, ""), Nz(Me.sTo, ""), Nz(Me.sCC, ""), Nz(Me.sBcc, ""), Nz(Me.sAttachment, ""))
+    End If
 End Sub
 
 Private Sub CreateDraftEmail(Response As WebResponse)
@@ -34,7 +40,12 @@ Private Sub CreateDraftEmail(Response As WebResponse)
 End Sub
 
 Private Sub cmdSend_Click()
-    SendEmail Graph.GraphSendMail(Nz(Me.sSubject, ""), "HTML", Nz(Me.sBody, ""), Nz(Me.sTo, ""), Nz(Me.sCC, ""), Nz(Me.sBcc, ""), Nz(Me.sAttachment, ""))
+    If Nz(Me.sFrom, "") = "" And sGrantType = "client_credentials" Then
+        MsgBox "From address is mandatory and must be a valid mailbox in this client."
+        Me.sFrom.SetFocus
+    Else
+        SendEmail Graph.GraphSendMail(Nz(Me.sFrom, ""), Nz(Me.sSubject, ""), "HTML", Nz(Me.sBody, ""), Nz(Me.sTo, ""), Nz(Me.sCC, ""), Nz(Me.sBcc, ""), Nz(Me.sAttachment, ""))
+    End If
 End Sub
 
 Private Sub SendEmail(Response As WebResponse)
@@ -42,5 +53,14 @@ Private Sub SendEmail(Response As WebResponse)
         MsgBox "Email Sent!"
     Else
         MsgBox "Error " & Response.StatusCode & ": " & Response.Content
+    End If
+End Sub
+
+Private Sub Form_Open(Cancel As Integer)
+    sGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If sGrantType = "client_credentials" Then
+        Me.sFrom.Visible = True
+    Else
+        Me.sFrom.Visible = False
     End If
 End Sub

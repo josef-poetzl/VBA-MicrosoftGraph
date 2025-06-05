@@ -9,14 +9,30 @@ Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Compare Database
 Option Explicit
+Dim sGrantType As String
+
+Private Sub cmdListContacts_Click()
+    CurrentDb.Execute "DELETE FROM TempContactsTable"
+    If Nz(Me.fromMailbox, "") = "" And sGrantType = "client_credentials" Then
+        MsgBox "From whose mailbox is mandatory and must be a valid mailbox in this client."
+        Me.fromMailbox.SetFocus
+    Else
+        'Second parameter is optional, if filled in use the name of a folder,
+        'for example my contacts are in TempContacts so I use that
+        ListOutlookContacts Graph.ListContacts(Nz(Me.fromMailbox, ""), Nz(Me.folderName, ""))
+        Me.lstContacts.Requery
+        Me.lstContacts.Visible = True
+    End If
+End Sub
 
 Private Sub Form_Open(Cancel As Integer)
     CurrentDb.Execute "DELETE FROM TempContactsTable"
-    
-    'parameter is optional, if filled in use the name of a folder,
-    'for example my contacts are in TempContacts so I use that
-    ListOutlookContacts Graph.ListContacts("TempContacts")
-    Me.lstContacts.Requery
+    sGrantType = DLookup("GrantType", "AdminTable") 'Authorization grant type
+    If sGrantType = "client_credentials" Then
+        Me.fromMailbox.Visible = True
+    Else
+        Me.fromMailbox.Visible = False
+    End If
 End Sub
 
 Private Sub ListOutlookContacts(Response As WebResponse)
