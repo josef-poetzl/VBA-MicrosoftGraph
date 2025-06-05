@@ -40,9 +40,11 @@ Public ClientId As String
 Public TenantID As String
 Public ApiKey As String
 Public AuthorizationCode As String
+Public ClientSecret As String
 Public Token As String
 Public Scopes As Variant
 Public WaitForLogin As Integer
+Public GrantType As String
 
 ' ============================================= '
 ' Public Methods
@@ -53,11 +55,16 @@ Public WaitForLogin As Integer
 '
 ' @param {String} ClientId
 ' @param {String} TenantID
+' @param {String} ClientSecret
+' @param {Integer} WaitForLogin
+' @param {String} GrantType
 ''
-Public Sub Setup(ClientId As String, TenantID As String, WaitForLogin As Integer)
+Public Sub Setup(ClientId As String, TenantID As String, ClientSecret As String, WaitForLogin As Integer, GrantType As String)
     Me.ClientId = ClientId
     Me.TenantID = TenantID
+    Me.ClientSecret = ClientSecret
     Me.WaitForLogin = WaitForLogin
+    Me.GrantType = GrantType
 End Sub
 
 ''
@@ -167,11 +174,11 @@ End Sub
 '    WebHelpers.LogError auth_ErrorDescription, "GraphAuthenticator.Login", 11040 + vbObjectError
 '    Err.Raise 11040 + vbObjectError, "GraphAuthenticator.Login", auth_ErrorDescription
 'End Sub
-'
+
 Public Sub Login() ' If you have Access with the new Web browser control
     On Error GoTo auth_ErrorHandling
     Dim dtEnd As Date
-    
+
     ' No need to login if API key, authorization code, or token have been set
     If Me.ApiKey <> "" Or Me.AuthorizationCode <> "" Or Me.Token <> "" Then
         Exit Sub
@@ -188,7 +195,11 @@ Public Sub Login() ' If you have Access with the new Web browser control
     Dim auth_IE As Object
     DoCmd.OpenForm "EdgeForm"
     Set auth_IE = Forms!EdgeForm.EdgeBrowser
-'    Set auth_IE = CreateObject("Selenium.EdgeDriver")
+
+'   The below loop was added because Navigate does not work until the EDGE browser control is ready
+    Do While auth_IE.ReadyState <> acComplete
+        DoEvents
+    Loop
     auth_IE.Navigate GetLoginUrl()
 
     ' Wait for login to complete
@@ -248,6 +259,10 @@ Public Sub Logout()
     Dim auth_IE As Object
     DoCmd.OpenForm "EdgeForm"
     Set auth_IE = Forms!EdgeForm.EdgeBrowser
+'   The below loop was added because Navigate does not work until the EDGE browser control is ready
+    Do While auth_IE.ReadyState <> acComplete
+        DoEvents
+    Loop
     auth_IE.Navigate "https://m365.cloud.microsoft/estslogout?ru=%2F&sessionId=" & sSessionID
     If Not auth_IE Is Nothing Then: DoCmd.Close acForm, "EdgeForm"
     Set auth_IE = Nothing
@@ -286,13 +301,17 @@ End Sub
 ''
 Private Sub IWebAuthenticator_BeforeExecute(ByVal Client As WebClient, ByRef Request As WebRequest)
     If Me.Token = "" Then
-        If Me.AuthorizationCode = "" Then
-            Me.Login
-        End If
-        If Me.AuthorizationCode <> "" Then
-            Me.Token = Me.GetToken(Client)
+        If GrantType = "authorization_code" Then
+            If Me.AuthorizationCode = "" Then
+                Me.Login
+            End If
+            If Me.AuthorizationCode <> "" Then
+                Me.Token = Me.GetToken(Client)
+            Else
+                Exit Sub
+            End If
         Else
-            Exit Sub
+            Me.Token = Me.GetToken(Client)
         End If
     End If
 
@@ -361,10 +380,13 @@ Public Function GetToken(Client As WebClient) As String
     
     auth_Body.Add "client_id", Me.ClientId
     auth_Body.Add "scope", Me.Scopes(1)
-    auth_Body.Add "code", Me.AuthorizationCode
     auth_Body.Add "redirect_uri", auth_RedirectUrl
-    auth_Body.Add "grant_type", "authorization_code"
-'    auth_Body.Add "client_secret", Me.ClientSecret
+    auth_Body.Add "grant_type", GrantType
+    If GrantType = "authorization_code" Then
+        auth_Body.Add "code", Me.AuthorizationCode
+    Else
+        auth_Body.Add "client_secret", Me.ClientSecret
+    End If
     Set auth_Request.body = auth_Body
     
     Set auth_Response = auth_TokenClient.Execute(auth_Request)
