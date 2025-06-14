@@ -1,0 +1,20 @@
+---------------------------------------------------------------------------------------
+ Package: VBA-MicrosoftGraph
+---------------------------------------------------------------------------------------
+<codelib>
+  <package>VBA-MicrosoftGraph</package>
+  <description>VBA-MicrosoftGraph makes working with the Microsoft Graph WEB API from VBA easier. (https://github.com/mbarnesatbbs/VBA-MicrosoftGraph)</description>
+  <use>/Src/AttachmentHelpers.bas</use>
+  <use>/Src/Dictionary.cls</use>
+  <use>/Src/Graph.bas</use>
+  <use>/Src/TimeZoneHelpers.bas</use>
+  <use>/Src/WebClient.cls</use>
+  <use>/Src/WebHelpers.bas</use>
+  <use>/Src/WebRequest.cls</use>
+  <use>/Src/WebResponse.cls</use>
+  <use>/authenticators/GraphAuthenticator.cls</use>
+  <use>/authenticators/IWebAuthenticator.cls</use>
+  <use>/authenticators/OAuth2Authenticator.cls</use>
+  <ref><name>MSXML2</name><major>6</major><minor>0</minor><guid>{F5078F18-C551-11D3-89B9-0000F81FE221}</guid></ref>
+</codelib>
+---------------------------------------------------------------------------------------
